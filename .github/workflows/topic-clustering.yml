@@ -1,0 +1,49 @@
+name: "Topic Clustering"
+
+# Clusters articles into topics and generates AI summaries
+# Runs independently from main RSS fetching for isolation
+
+on:
+  schedule:
+    # Run every 2 hours at minute 15 (offset from other workflows)
+    - cron: '15 */2 * * *'
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  cluster-topics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Topic Clustering
+        env:
+          # Redis/KV for caching
+          REDIS_URL: ${{ secrets.KV_URL }}
+          KV_URL: ${{ secrets.KV_URL }}
+          KV_REST_API_URL: ${{ secrets.KV_REST_API_URL }}
+          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
+          # Gemini for AI summaries
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npx tsx scripts/cluster-topics.ts
+
+      - name: Report status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "Topic clustering completed successfully"
+          else
+            echo "Topic clustering failed - main site unaffected"
+          fi
