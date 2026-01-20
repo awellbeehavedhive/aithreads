@@ -2,8 +2,8 @@ name: "Background Refresh Worker"
 
 on:
   schedule:
-    # Run every hour at minute 0
-    - cron: '0 * * * *'
+    # Run every 4 hours at minute 0 (reduced from hourly to save Redis commands)
+    - cron: '0 */4 * * *'
   # Allow manual trigger
   workflow_dispatch:
 
