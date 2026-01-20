@@ -144,15 +144,38 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Interleaved Content */}
+        {/* Mobile Layout: Topics first, then articles */}
+        {!loading && (topics.length > 0 || articles.length > 0) && (
+          <div className="md:hidden space-y-6">
+            {/* All topics first (sorted by most recent) */}
+            {[...topics]
+              .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+              .map((topic) => (
+                <FeaturedTopicCard key={topic.id} topic={topic} />
+              ))}
+
+            {/* Then all articles */}
+            <div className="grid grid-cols-1 gap-4">
+              {articles.map((article) => (
+                <CompactArticleCard
+                  key={article.url}
+                  article={article}
+                  onThreadClick={() => openThread(article)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Desktop Layout: Interleaved content */}
         {!loading && interleavedContent.length > 0 && (
-          <div className="space-y-6">
+          <div className="hidden md:block space-y-6">
             {interleavedContent.map((item, index) => (
               <div key={index}>
                 {item.type === 'topic' ? (
                   <FeaturedTopicCard topic={item.data} />
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                     {item.data.map((article) => (
                       <CompactArticleCard
                         key={article.url}
@@ -168,7 +191,7 @@ export default function HomePage() {
         )}
 
         {/* Empty State */}
-        {!loading && interleavedContent.length === 0 && (
+        {!loading && topics.length === 0 && articles.length === 0 && (
           <div className="text-center py-20 text-gray-400">
             <p className="text-lg">No content available.</p>
           </div>
