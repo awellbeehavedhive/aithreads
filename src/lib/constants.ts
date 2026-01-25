@@ -272,6 +272,15 @@ export const PLACEHOLDER_IMAGE_PATTERNS = {
     /missing[-_]?image/i,
     // Tracking pixels (backup check)
     /1x1|tracking|pixel|spacer|blank/i,
+    // Video URLs that won't render as images
+    /\.m3u8/i,
+    /\.mp4/i,
+    /\.webm/i,
+    /\/video\//i,
+    // Bloomberg video content (often broken thumbnails)
+    /video\.bloomberg/i,
+    /bbtv\.video/i,
+    /assets\.bwbx\.io\/.*video/i,
   ],
 
   // Image URLs containing these exact brand logo identifiers

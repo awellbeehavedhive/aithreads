@@ -9,6 +9,7 @@
 import { createHash } from 'crypto';
 import { Article, ArticleCluster } from '@/types';
 import { normalizeTitle, isSameStory, parseDate, getAgeInHours } from './sota-sorting';
+import { getSourceAuthorityBoost } from './constants';
 
 // ============================================================================
 // CONFIGURATION
@@ -41,16 +42,67 @@ export function generateClusterId(normalizedTitle: string): string {
 // ============================================================================
 
 /**
+ * Known low-quality image patterns to avoid
+ */
+const LOW_QUALITY_IMAGE_PATTERNS = [
+  /\.m3u8/i,                          // Video streams
+  /placeholder/i,                      // Placeholder images
+  /logo/i,                            // Logo images
+  /default[-_]?image/i,               // Default fallback images
+  /\?.*w=\d{1,2}(?:&|$)/i,           // Very small images (w=10, w=50, etc.)
+  /thumb(?:nail)?.*(?:small|tiny)/i, // Small thumbnails
+  /icon/i,                            // Icons
+  /avatar/i,                          // Avatars
+  /profile/i,                         // Profile pictures
+  /s\.yimg\.com/i,                   // Yahoo small images
+  /syndication\./i,                   // Syndication placeholder images
+  /video\.bloomberg/i,                // Bloomberg video thumbnails (often broken)
+  /bbtv\.video/i,                     // Bloomberg TV video streams
+  /\/video\//i,                       // Generic video paths
+  /\.mp4/i,                           // MP4 video files
+  /\.webm/i,                          // WebM video files
+];
+
+/**
  * Select the best image from a cluster of articles
- * Prefers: articles with highest AI score that have images
+ *
+ * Priority:
+ * 1. Quality sources (Reuters, AP, NYT, etc.) tend to have better images
+ * 2. Higher AI score indicates better article quality
+ * 3. Avoid low-quality/placeholder image patterns
  */
 export function selectBestImage(articles: Article[]): string | null {
-  // Sort by AI score descending, then filter those with images
-  const withImages = articles
-    .filter(a => a.urlToImage && !a.urlToImage.includes('.m3u8'))
-    .sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0));
+  // Filter to articles with valid images
+  const withImages = articles.filter(a => {
+    if (!a.urlToImage) return false;
 
-  return withImages[0]?.urlToImage || null;
+    // Filter out low-quality image patterns
+    for (const pattern of LOW_QUALITY_IMAGE_PATTERNS) {
+      if (pattern.test(a.urlToImage)) return false;
+    }
+
+    return true;
+  });
+
+  if (withImages.length === 0) return null;
+
+  // Score each article for image selection
+  // Higher score = better image candidate
+  const scored = withImages.map(a => {
+    const sourceAuthority = getSourceAuthorityBoost(a.source?.name || '');
+    const aiScore = a.aiScore || 0;
+
+    // Combined score: authority weighted heavily + AI score
+    // Authority matters most for image quality
+    const imageScore = (sourceAuthority * 3) + (aiScore * 0.5);
+
+    return { article: a, imageScore };
+  });
+
+  // Sort by image score descending
+  scored.sort((a, b) => b.imageScore - a.imageScore);
+
+  return scored[0]?.article.urlToImage || null;
 }
 
 // ============================================================================

@@ -94,31 +94,33 @@ const RSS_FEEDS: Record<string, RSSFeedConfig> = {
     category: 'health'
   },
   
-  // CNN
-  'cnn-top': {
-    url: 'http://rss.cnn.com/rss/cnn_topstories.rss',
-    sourceName: 'CNN',
-    provider: 'rss-cnn',
-    category: 'general'
-  },
-  'cnn-world': {
-    url: 'http://rss.cnn.com/rss/cnn_world.rss',
-    sourceName: 'CNN',
-    provider: 'rss-cnn',
-    category: 'general'
-  },
-  'cnn-business': {
-    url: 'http://rss.cnn.com/rss/money_latest.rss',
-    sourceName: 'CNN',
-    provider: 'rss-cnn',
-    category: 'business'
-  },
-  'cnn-tech': {
-    url: 'http://rss.cnn.com/rss/cnn_tech.rss',
-    sourceName: 'CNN',
-    provider: 'rss-cnn',
-    category: 'technology'
-  },
+  // CNN - DISABLED Jan 2026: RSS feeds frozen since Aug 2024, serving 2023 articles
+  // See: http://rss.cnn.com/rss/cnn_topstories.rss (lastBuildDate: Aug 22, 2024)
+  // TODO: Re-enable if CNN restores RSS or find alternative (Google News CNN search?)
+  // 'cnn-top': {
+  //   url: 'http://rss.cnn.com/rss/cnn_topstories.rss',
+  //   sourceName: 'CNN',
+  //   provider: 'rss-cnn',
+  //   category: 'general'
+  // },
+  // 'cnn-world': {
+  //   url: 'http://rss.cnn.com/rss/cnn_world.rss',
+  //   sourceName: 'CNN',
+  //   provider: 'rss-cnn',
+  //   category: 'general'
+  // },
+  // 'cnn-business': {
+  //   url: 'http://rss.cnn.com/rss/money_latest.rss',
+  //   sourceName: 'CNN',
+  //   provider: 'rss-cnn',
+  //   category: 'business'
+  // },
+  // 'cnn-tech': {
+  //   url: 'http://rss.cnn.com/rss/cnn_tech.rss',
+  //   sourceName: 'CNN',
+  //   provider: 'rss-cnn',
+  //   category: 'technology'
+  // },
   
   // Health Sources - Using working feeds
   'health-mayoclinic': {
@@ -731,8 +733,21 @@ export async function fetchRSSFeed(feedKey: string): Promise<RSSArticle[]> {
     const feed = await parser.parseURL(feedConfig.url);
     const articles: RSSArticle[] = [];
 
+    // Maximum article age: 7 days (filter out stale content from broken feeds)
+    const MAX_ARTICLE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
     for (const item of feed.items.slice(0, 20)) { // Limit to 20 most recent
       if (!item.link || !item.title) continue;
+
+      // Filter out articles older than 7 days
+      const pubDate = item.pubDate || item.isoDate;
+      if (pubDate) {
+        const articleAge = now - new Date(pubDate).getTime();
+        if (articleAge > MAX_ARTICLE_AGE_MS) {
+          continue; // Skip stale articles
+        }
+      }
 
       // Extract image from various RSS formats
       let imageUrl: string | null = null;
@@ -884,7 +899,8 @@ export async function fetchRSSByCategory(category: string): Promise<RSSArticle[]
     general: [
       // Google News - re-enabled for coverage (URLs may redirect but captures trending stories)
       'google-news-top', 'google-news-world',
-      'nyt-world', 'bbc-world', 'cnn-top', 'cnn-world', 'reuters-world', 'guardian-world', 'npr-news',
+      'nyt-world', 'bbc-world', 'reuters-world', 'guardian-world', 'npr-news',
+      // CNN disabled - RSS feeds frozen since Aug 2024
       'france24-top', 'france24-americas', 'france24-middle-east', 'france24-africa',
       'abcnews-us', 'abcnews-world', 'dw-top', 'dw-asia', 'japan-news',
       'euronews-world', 'timesofindia-world', 'aljazeera-news',
@@ -896,7 +912,8 @@ export async function fetchRSSByCategory(category: string): Promise<RSSArticle[]
     ],
     business: [
       'google-news-business', // Re-enabled for coverage
-      'nyt-business', 'bbc-business', 'cnn-business', 'reuters-business', 'guardian-business', 'npr-business',
+      'nyt-business', 'bbc-business', 'reuters-business', 'guardian-business', 'npr-business',
+      // CNN disabled - RSS feeds frozen since Aug 2024
       'bloomberg-business', 'fortune-business', 'abcnews-business', 'dw-business',
       'euronews-business', 'timesofindia-business',
       // New sources (Jan 2026)
@@ -904,7 +921,8 @@ export async function fetchRSSByCategory(category: string): Promise<RSSArticle[]
     ],
     technology: [
       'google-news-tech', // Re-enabled for coverage
-      'nyt-tech', 'bbc-tech', 'cnn-tech', 'reuters-tech', 'guardian-tech', 'wired', 'theverge',
+      'nyt-tech', 'bbc-tech', 'reuters-tech', 'guardian-tech', 'wired', 'theverge',
+      // CNN disabled - RSS feeds frozen since Aug 2024
       'arstechnica', 'npr-tech', 'engadget', 'venturebeat', 'abcnews-tech',
       'euronews-tech', 'timesofindia-tech',
       // New sources (Jan 2026)
