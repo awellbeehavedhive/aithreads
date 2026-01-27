@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { getCachedNews, getPaginatedResults, getRawCache } from '@/lib/news-cache';
 import { initializeCache } from '@/lib/startup';
 import { getRecentArticlesByCategory, getAllRecentArticles } from '@/lib/article-store';
-import { weightedSort, ScoredArticle } from '@/lib/weighted-scoring';
+import { unifiedSort, ScoredArticle } from '@/lib/weighted-scoring';
+import { getTopics } from '@/lib/topic-cache';
+import { Article, Topic } from '@/types';
 
 // Initialize cache on first request
 let cacheInitialized = false;
@@ -21,48 +23,124 @@ export async function GET(request: Request) {
   try {
     let result;
 
-    // Handle "All" category - combine all categories with weighted ranking
+    // Handle "All" category - unified ranking matching website homepage
     if (categoryParam === 'all') {
       const rawCache = await getRawCache();
-      const allArticles: any[] = [];
+      const allArticles: Article[] = [];
       const categories = ['technology', 'science', 'business', 'health'];
 
       // Combine articles from known categories (with category tag)
       for (const cat of categories) {
         const data = rawCache[cat];
         if (data?.articles && Array.isArray(data.articles)) {
-          allArticles.push(...data.articles.map((a: any) => ({ ...a, category: cat })));
+          allArticles.push(...(data.articles as Article[]).map(a => ({ ...a, category: cat })));
         }
       }
 
       // Also pull from other cached categories
       for (const [cat, data] of Object.entries(rawCache)) {
         if (!categories.includes(cat) && cat !== 'all' && data.articles && Array.isArray(data.articles)) {
-          allArticles.push(...data.articles.map((a: any) => ({ ...a, category: cat })));
+          allArticles.push(...(data.articles as Article[]).map(a => ({ ...a, category: cat })));
         }
       }
 
-      // Filter out low-quality articles (score < 10)
+      // Filter: minimum quality + must have image
       const MIN_QUALITY_SCORE = 10;
-      const qualityArticles = allArticles.filter((a: any) =>
-        a.aiScore === undefined || a.aiScore === null || a.aiScore >= MIN_QUALITY_SCORE
-      );
+      const qualityArticles = allArticles.filter((a: Article) => {
+        if (a.aiScore !== undefined && a.aiScore !== null && (a.aiScore as number) < MIN_QUALITY_SCORE) return false;
+        if (!a.urlToImage || !a.urlToImage.startsWith('http')) return false;
+        if (a.url?.includes('bloomberg.com/news/videos/')) return false;
+        return true;
+      });
 
-      // Apply weighted ranking (same algorithm as website homepage)
-      const sortResult = weightedSort(qualityArticles as ScoredArticle[], {
+      // Fetch topics for unified ranking (same as website page.tsx)
+      let topics: Topic[] = [];
+      try {
+        topics = await getTopics(20);
+      } catch {
+        // Topics are optional
+      }
+
+      // Deduplicate: remove articles that share images with topics
+      const normalizeImageUrl = (url: string): string => {
+        try {
+          const parsed = new URL(url);
+          return `${parsed.origin}${parsed.pathname}`.toLowerCase();
+        } catch {
+          return url.toLowerCase();
+        }
+      };
+
+      const topicImageUrls = new Set<string>();
+      topics.forEach(topic => {
+        if (topic.image) topicImageUrls.add(normalizeImageUrl(topic.image));
+        topic.sources?.forEach(source => {
+          if (source.urlToImage) topicImageUrls.add(normalizeImageUrl(source.urlToImage));
+        });
+      });
+
+      const seenImages = new Set<string>();
+      const dedupedArticles = qualityArticles.filter(a => {
+        if (!a.urlToImage) return false;
+        const normalized = normalizeImageUrl(a.urlToImage);
+        if (topicImageUrls.has(normalized)) return false;
+        if (seenImages.has(normalized)) return false;
+        seenImages.add(normalized);
+        return true;
+      });
+
+      // Apply unified sort (topics + articles ranked together) — matches website
+      const sortResult = unifiedSort(topics, dedupedArticles as ScoredArticle[], {
         enableDiversityAttenuation: true,
         enableDeduplication: true,
       });
-      const rankedArticles = sortResult.articles;
+
+      const rankedContent = sortResult.content;
 
       // Paginate
       const startIndex = (page - 1) * pageSize;
       const endIndex = startIndex + pageSize;
-      const paginatedArticles = rankedArticles.slice(startIndex, endIndex);
+      const paginatedItems = rankedContent.slice(startIndex, endIndex);
+
+      // Map to response format — topics become article-like objects with contentType
+      const articles = paginatedItems.map(item => {
+        if (item.contentType === 'topic') {
+          const topic = item as any;
+          return {
+            title: topic.title,
+            description: topic.summary || null,
+            url: topic.sources?.[0]?.url || `https://aithreads-prod.vercel.app/topics/${topic.id}`,
+            urlToImage: topic.image || null,
+            publishedAt: topic.publishedAt,
+            source: { name: `${topic.sourceCount} sources`, id: null },
+            aiScore: Math.round(item.weightedScore ?? 0),
+            category: topic.categories?.[0] || 'all',
+            contentType: 'topic',
+            topicId: topic.id,
+            sourceCount: topic.sourceCount,
+          };
+        } else {
+          const article = item as any;
+          return {
+            title: article.title,
+            description: article.description || null,
+            url: article.url,
+            urlToImage: article.urlToImage || null,
+            publishedAt: article.publishedAt,
+            source: article.source || { name: 'Unknown', id: null },
+            aiScore: article.aiScore ?? 0,
+            aiReason: article.aiReason || null,
+            kidsScore: article.kidsScore ?? null,
+            kidsTitle: article.kidsTitle ?? null,
+            category: article.category || 'all',
+            contentType: 'article',
+          };
+        }
+      });
 
       result = {
-        articles: paginatedArticles,
-        totalResults: rankedArticles.length,
+        articles,
+        totalResults: rankedContent.length,
       };
     } else {
       // Single category - get all articles, filter, then paginate
@@ -92,7 +170,7 @@ export async function GET(request: Request) {
         totalResults: qualityArticles.length,
       };
     }
-    
+
     // Note: Pre-generation is now handled exclusively by /api/refresh-cache
     // This ensures it only happens during scheduled refreshes, not on every page load
 
@@ -188,4 +266,3 @@ export async function GET(request: Request) {
     );
   }
 }
-
