@@ -106,18 +106,21 @@ export async function GET(request: Request) {
       const articles = paginatedItems.map(item => {
         if (item.contentType === 'topic') {
           const topic = item as any;
+          const sourceNames = [...new Set((topic.sources || []).map((s: any) => s.source))].slice(0, 5) as string[];
+          const primarySource = sourceNames[0] || 'Multiple sources';
           return {
             title: topic.title,
             description: topic.summary || null,
             url: topic.sources?.[0]?.url || `https://aithreads-prod.vercel.app/topics/${topic.id}`,
             urlToImage: topic.image || null,
             publishedAt: topic.publishedAt,
-            source: { name: `${topic.sourceCount} sources`, id: null },
+            source: { name: primarySource, id: null },
             aiScore: Math.round(item.weightedScore ?? 0),
             category: topic.categories?.[0] || 'all',
             contentType: 'topic',
             topicId: topic.id,
             sourceCount: topic.sourceCount,
+            sourceNames,
           };
         } else {
           const article = item as any;
