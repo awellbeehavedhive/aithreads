@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCachedNews, getPaginatedResults, getRawCache } from '@/lib/news-cache';
 import { initializeCache } from '@/lib/startup';
 import { getRecentArticlesByCategory, getAllRecentArticles } from '@/lib/article-store';
+import { weightedSort, ScoredArticle } from '@/lib/weighted-scoring';
 
 // Initialize cache on first request
 let cacheInitialized = false;
@@ -20,40 +21,48 @@ export async function GET(request: Request) {
   try {
     let result;
 
-    // Handle "All" category - combine all categories
+    // Handle "All" category - combine all categories with weighted ranking
     if (categoryParam === 'all') {
       const rawCache = await getRawCache();
       const allArticles: any[] = [];
+      const categories = ['technology', 'science', 'business', 'health'];
 
-      // Combine articles from all categories
+      // Combine articles from known categories (with category tag)
+      for (const cat of categories) {
+        const data = rawCache[cat];
+        if (data?.articles && Array.isArray(data.articles)) {
+          allArticles.push(...data.articles.map((a: any) => ({ ...a, category: cat })));
+        }
+      }
+
+      // Also pull from other cached categories
       for (const [cat, data] of Object.entries(rawCache)) {
-        if (data.articles && Array.isArray(data.articles)) {
-          allArticles.push(...data.articles);
+        if (!categories.includes(cat) && cat !== 'all' && data.articles && Array.isArray(data.articles)) {
+          allArticles.push(...data.articles.map((a: any) => ({ ...a, category: cat })));
         }
       }
 
       // Filter out low-quality articles (score < 10)
-      // But allow unscored articles through (they haven't been rated yet)
       const MIN_QUALITY_SCORE = 10;
       const qualityArticles = allArticles.filter((a: any) =>
         a.aiScore === undefined || a.aiScore === null || a.aiScore >= MIN_QUALITY_SCORE
       );
 
-      // Sort by AI score (highest first)
-      qualityArticles.sort((a: any, b: any) => {
-        const scoreA = a.aiScore ?? 0;
-        const scoreB = b.aiScore ?? 0;
-        return scoreB - scoreA;
+      // Apply weighted ranking (same algorithm as website homepage)
+      const sortResult = weightedSort(qualityArticles as ScoredArticle[], {
+        enableDiversityAttenuation: true,
+        enableDeduplication: true,
       });
+      const rankedArticles = sortResult.articles;
 
       // Paginate
       const startIndex = (page - 1) * pageSize;
       const endIndex = startIndex + pageSize;
-      const paginatedArticles = qualityArticles.slice(startIndex, endIndex);
+      const paginatedArticles = rankedArticles.slice(startIndex, endIndex);
 
       result = {
         articles: paginatedArticles,
-        totalResults: qualityArticles.length,
+        totalResults: rankedArticles.length,
       };
     } else {
       // Single category - get all articles, filter, then paginate
